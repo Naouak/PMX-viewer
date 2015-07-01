@@ -75,6 +75,7 @@ function Vec3(){
         this.x = file.readFloat();
         this.y = file.readFloat();
         this.z = file.readFloat();
+        return this;
     };
     this.getData = function(){
         return [this.x, this.y, this.z];
@@ -91,6 +92,11 @@ function Vec4(){
         this.y = file.readFloat();
         this.z = file.readFloat();
         this.w = file.readFloat();
+        return this;
+    };
+
+    this.getData = function(){
+        return new Float32Array([this.x, this.y, this.z, this.w]);
     }
 }
 
@@ -100,8 +106,12 @@ function Text(){
     this.readFromFile = function(file){
         this.length = file.readByte(4);
         this.length = (this.length[1]<<8)+this.length[0];
+        if(this.length == 0){
+            return this;
+        }
         this.text = file.readUbyte(this.length);
-    }
+        return this;
+    };
 
     this.toString = function(){
         var str = "";
@@ -166,11 +176,34 @@ function SDEF(buffer, boneIndexSize){
     this.R1.readFromFile(buffer);
 }
 
+function PMXTexture(buffer, index){
+    var that = this;
+
+    this.path = new Text();
+    this.path.readFromFile(buffer);
+
+    this.pathString = this.path.toString();
+
+    this.smallFile = this.pathString.split(".").slice(0,-1).join(".")+".jpg";
+    this.loaded = false;
+
+
+    this.load = function(basePath,cb){
+        cb = cb || function(){};
+        this.image = new Image();
+        this.image.onload = function(){
+            that.loaded = true;
+            cb(index, that.image);
+
+        };
+        this.image.src = [basePath,this.smallFile].join("/");
+    }
+}
+
 function PMXHeader(buffer){
     this.signature = buffer.readByte(4);
     this.version = buffer.readFloat();
     this.globalsCount = buffer.readByte(1)[0];
-    console.log(this.globalsCount);
     this.globals = buffer.readByte(this.globalsCount);
     this.nameLocal = new Text();
     this.nameLocal.readFromFile(buffer);
@@ -223,6 +256,29 @@ function PMXVertex(buffer, addVec4, boneIndex){
     this.edgeScale = buffer.readFloat();
 }
 
+function PMXMaterial(buffer, textureIndexSize){
+    this.nameLocal = new Text().readFromFile(buffer);
+    this.nameUniversal = new Text().readFromFile(buffer);
+    this.diffuse = new Vec4().readFromFile(buffer);
+    this.specular = new Vec3().readFromFile(buffer);
+    this.specularStrength = buffer.readFloat();
+    this.ambient = new Vec3().readFromFile(buffer);
+    this.drawingFlags = buffer.readByte(1)[0];
+    this.edgeColor = new Vec4().readFromFile(buffer);
+    this.edgeScale = buffer.readFloat();
+    this.textureIndex = readBoneIndex(buffer, textureIndexSize);
+    this.environmentIndex = readBoneIndex(buffer, textureIndexSize);
+    this.environmentBlendMode = buffer.readByte(1)[0];
+    this.toonReference = buffer.readByte(1)[0];
+    if(this.toonReference == 1){
+        this.toonValue = buffer.readByte(1)[0];
+    } else {
+        this.toonValue = readBoneIndex(buffer, textureIndexSize);
+    }
+    this.metadata = new Text().readFromFile(buffer);
+    this.surfaceCount = buffer.readUint();
+}
+
 function PMXFile(buffer){
     this.header = new PMXHeader(buffer);
 //        switch(this.header.globals[2]){
@@ -241,6 +297,7 @@ function PMXFile(buffer){
     this.vertexCount = buffer.readUint();
     this.vertices = [];
     this.vertexData = new Float32Array(this.vertexCount*3);
+    this.uvData = new Float32Array(this.vertexCount*2);
     for(var i = 0; i < this.vertexCount; i++){
         var vertex = new PMXVertex(buffer,this.header.globals[1], this.header.globals[5]);
         this.vertices.push(vertex);
@@ -248,6 +305,8 @@ function PMXFile(buffer){
         this.vertexData[3*i] = vertexData[0];
         this.vertexData[3*i+1] = vertexData[1];
         this.vertexData[3*i+2] = vertexData[2];
+        this.uvData[2*i] = vertex.uv.x;
+        this.uvData[2*i+1] = vertex.uv.y;
     }
 
     this.surfaceCount = buffer.readUint();
@@ -259,9 +318,20 @@ function PMXFile(buffer){
     this.textureCount = buffer.readInt();
     this.textures = [];
     for(i = 0; i < this.textureCount; i++){
-        var path = new Text();
-        path.readFromFile(buffer);
-        this.textures.push(path);
+        this.textures.push(new PMXTexture(buffer, i));
+    }
+
+    this.loadTextures = function(basePath, cb){
+        this.textures.forEach(function(texture){
+            texture.load(basePath, cb);
+        })
+    };
+
+    this.materialCount = buffer.readInt();
+    this.materials = [];
+    for(i = 0; i < this.materialCount; i++){
+        this.materials.push(new PMXMaterial(buffer, this.header.globals[3]));
+        console.log(this.materials[i].nameUniversal.toString());
     }
 
 }

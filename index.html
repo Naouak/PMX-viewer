@@ -9,17 +9,25 @@
 
     <script id="vertex-shader" type="x-shader/x-vertex">
         attribute vec4 a_position;
+        attribute vec2 a_uv;
         uniform mat4 u_matrix;
 
+        varying highp vec2 vTextureCoord;
         void main() {
           // Multiply the position by the matrix.
           gl_Position = u_matrix * a_position;
+          vTextureCoord = a_uv;
         }
     </script>
 
     <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        varying highp vec2 vTextureCoord;
+        uniform sampler2D uSampler;
+
         void main() {
-          gl_FragColor = vec4(0, 1, 0, 1);  // green
+          gl_FragColor = texture2D(uSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+          // gl_FragColor = vec4(0, 1, 0, 1);  // green
         }
     </script>
 
@@ -36,15 +44,21 @@
             if (arrayBuffer) {
                 file = new FileReader(arrayBuffer);
                 pmx = new PMXFile(file);
+
+                var textures = [];
+
+                pmx.loadTextures("model",function(index, image){
+                    console.log("Texture %d loaded", index);
+                    textures[index] = loadTexture(image);
+                });
+
                 console.log(pmx);
                 var rot = 0;
                 var frameFunction = function(){
                     rot+=0.01;
-                    draw(pmx.vertexData,pmx.surfaces,0,-10,-25,rot);
-
+                    draw(pmx.vertexData,pmx.uvData,textures, pmx.materials, pmx.surfaces,0,-10,-25,rot);
                     requestAnimationFrame(frameFunction);
                 };
-
                 requestAnimationFrame(frameFunction);
             }
         };
@@ -128,10 +142,17 @@
         return createProgram(gl, vertexShader, fragmentShader);
     };
 
+
+    var whiteTex;
+
     function start(){
         // Get A WebGL context
         var canvas = document.getElementById("glcanvas");
         gl = canvas.getContext("experimental-webgl");
+
+        gl.enable(gl.DEPTH_TEST);
+
+        whiteTex = gl.createTexture();
 
         // setup a GLSL program
         shaderProgram = createProgramFromScripts(gl, "vertex-shader", "fragment-shader");
@@ -147,28 +168,55 @@
         return vertexBuffer;
     }
 
-    function draw(vertices, indices, x,y,z, rot){
+
+    function draw(vertices, uvs, textures, materials, indices, x,y,z, rot){
         gl.clearColor(0.0,0.0,0.0,1.0);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
 
         //Bind vertices position to shader
-        generateVerticeBuffer(gl, vertices);
-
+        var vertexBuffer = generateVerticeBuffer(gl, vertices);
         var positionLoc = gl.getAttribLocation(shaderProgram,"a_position");
-        var matrixLoc = gl.getUniformLocation(shaderProgram,"u_matrix");
-        var matrix = matrixMultiply(makeYRotation(rot), makeTranslation(x,y,z));
-
         gl.enableVertexAttribArray(positionLoc);
         gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, 0,0);
 
+        // Texture Coordinates
+        var textureCoordsBuffer = generateVerticeBuffer(gl, uvs);
+        var textureCoordsAttrib = gl.getAttribLocation(shaderProgram, "a_uv");
+        gl.enableVertexAttribArray(textureCoordsAttrib);
+        gl.vertexAttribPointer(textureCoordsAttrib, 2, gl.FLOAT, false, 0,0);
+
+        // Triangles
         var indiceBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indiceBuffer);
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
+        // Projection Matrix
+        var matrixLoc = gl.getUniformLocation(shaderProgram,"u_matrix");
+        var matrix = matrixMultiply(makeYRotation(rot), makeTranslation(x,y,z));
         gl.uniformMatrix4fv(matrixLoc, false, matrixMultiply(matrix,makePerspective(Math.PI/4,640/480,1,2000)));
 
-        gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+        var surfaces = 0;
+        gl.activeTexture(gl.TEXTURE0);
+
+        for(var i = 1; i < materials.length; i++){
+            if(materials[i].toonReference == 0){
+                gl.bindTexture(gl.TEXTURE_2D, textures[materials[i].textureIndex]);
+                gl.uniform1i(gl.getUniformLocation(shaderProgram,"uSampler"), 0);
+                gl.drawElements(gl.TRIANGLES, surfaces+materials[i].surfaceCount, gl.UNSIGNED_SHORT, surfaces);
+                if(rot == 0.01){
+                    console.log(surfaces);
+                    console.log(i);
+                    console.log(materials[i]);
+                }
+
+            }
+
+            surfaces+=materials[i].surfaceCount;
+
+        }
+
+
     }
 
     function makePerspective(fieldOfViewInRadians, aspect, near, far) {
@@ -256,7 +304,17 @@
             a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33];
     }
 
+    function loadTexture(image){
+        var texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.bindTexture(gl.TEXTURE_2D, null);
 
+        return texture;
+    }
 
 </script>
 </body>

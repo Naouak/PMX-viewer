@@ -99,11 +99,20 @@ function Text(){
     this.text = null;
     this.readFromFile = function(file){
         this.length = file.readByte(4);
-        console.log(this.length);
-        console.log((this.length[1]<<8)+this.length[0]);
         this.length = (this.length[1]<<8)+this.length[0];
         this.text = file.readUbyte(this.length);
-        console.log(this.text);
+    }
+
+    this.toString = function(){
+        var str = "";
+        for(var i = 0; i < this.text.length; i+=2){
+            if(this.text[i+1] == 0){
+                str+=String.fromCharCode(this.text[i]);
+            } else {
+                str+=String.fromCharCode(this.text[i]<<8+this.text[i+1]);
+            }
+        }
+        return str;
     }
 }
 
@@ -246,4 +255,13 @@ function PMXFile(buffer){
     for(i = 0; i < this.surfaceCount; i++){
         this.surfaces[i] = (this.header.globals[2]==1?buffer.readUbyte(1)[0]:this.header.globals[2]==2?buffer.readUshort():buffer.readInt());
     }
+
+    this.textureCount = buffer.readInt();
+    this.textures = [];
+    for(i = 0; i < this.textureCount; i++){
+        var path = new Text();
+        path.readFromFile(buffer);
+        this.textures.push(path);
+    }
+
 }

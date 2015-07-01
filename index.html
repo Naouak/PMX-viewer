@@ -26,9 +26,9 @@
     <script type="text/javascript" src="pmx.js"></script>
 
 <script type="text/javascript">
-    function loadModel(){
+    function loadModel(url){
         var oReq = new XMLHttpRequest();
-        oReq.open("GET", "model/model.pmx", true);
+        oReq.open("GET", url, true);
         oReq.responseType = "arraybuffer";
 
         oReq.onload = function (oEvent) {
@@ -137,7 +137,7 @@
         shaderProgram = createProgramFromScripts(gl, "vertex-shader", "fragment-shader");
         gl.useProgram(shaderProgram);
 
-        loadModel();
+        loadModel("model/model.pmx");
     }
 
     function generateVerticeBuffer(gl, vertices){

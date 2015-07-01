@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title></title>
+    <meta charset="utf-8">
+</head>
+<body onload="start()">
+    <canvas id="glcanvas" width="640" height="480"></canvas>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec4 a_position;
+        uniform mat4 u_matrix;
+
+        void main() {
+          // Multiply the position by the matrix.
+          gl_Position = u_matrix * a_position;
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        void main() {
+          gl_FragColor = vec4(0, 1, 0, 1);  // green
+        }
+    </script>
+
+    <script type="text/javascript" src="pmx.js"></script>
+
+<script type="text/javascript">
+    function loadModel(){
+        var oReq = new XMLHttpRequest();
+        oReq.open("GET", "model/model.pmx", true);
+        oReq.responseType = "arraybuffer";
+
+        oReq.onload = function (oEvent) {
+            arrayBuffer = oReq.response; // Note: not oReq.responseText
+            if (arrayBuffer) {
+                file = new FileReader(arrayBuffer);
+                pmx = new PMXFile(file);
+                console.log(pmx);
+                var rot = 0;
+                var frameFunction = function(){
+                    rot+=0.01;
+                    draw(pmx.vertexData,pmx.surfaces,0,-10,-25,rot);
+
+                    requestAnimationFrame(frameFunction);
+                };
+
+                requestAnimationFrame(frameFunction);
+            }
+        };
+        oReq.send(null);
+
+    }
+    var gl;
+    var shaderProgram;
+
+    function compileShader(gl, shaderSource, shaderType) {
+        // Create the shader object
+        var shader = gl.createShader(shaderType);
+
+        // Set the shader source code.
+        gl.shaderSource(shader, shaderSource);
+
+        // Compile the shader
+        gl.compileShader(shader);
+
+        // Check if it compiled
+        var success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+        if (!success) {
+            // Something went wrong during compilation; get the error
+            throw "could not compile shader:" + gl.getShaderInfoLog(shader);
+        }
+
+        return shader;
+    }
+
+    function createProgram(gl, vertexShader, fragmentShader) {
+        // create a program.
+        var program = gl.createProgram();
+
+        // attach the shaders.
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+
+        // link the program.
+        gl.linkProgram(program);
+
+        // Check if it linked.
+        var success = gl.getProgramParameter(program, gl.LINK_STATUS);
+        if (!success) {
+            // something went wrong with the link
+            throw ("program filed to link:" + gl.getProgramInfoLog (program));
+        }
+
+        return program;
+    };
+
+    function createShaderFromScript(gl, scriptId, opt_shaderType) {
+        // look up the script tag by id.
+        var shaderScript = document.getElementById(scriptId);
+        if (!shaderScript) {
+            console.log(shaderScript);
+            throw("*** Error: unknown script element " + scriptId);
+        }
+
+        // extract the contents of the script tag.
+        var shaderSource = shaderScript.text;
+
+        // If we didn't pass in a type, use the 'type' from
+        // the script tag.
+        if (!opt_shaderType) {
+            if (shaderScript.type == "x-shader/x-vertex") {
+                opt_shaderType = gl.VERTEX_SHADER;
+            } else if (shaderScript.type == "x-shader/x-fragment") {
+                opt_shaderType = gl.FRAGMENT_SHADER;
+            } else if (!opt_shaderType) {
+                throw("*** Error: shader type not set");
+            }
+        }
+
+        return compileShader(gl, shaderSource, opt_shaderType);
+    };
+
+    function createProgramFromScripts(
+            gl, vertexShaderId, fragmentShaderId) {
+        var vertexShader = createShaderFromScript(gl, vertexShaderId);
+        var fragmentShader = createShaderFromScript(gl, fragmentShaderId);
+        return createProgram(gl, vertexShader, fragmentShader);
+    };
+
+    function start(){
+        // Get A WebGL context
+        var canvas = document.getElementById("glcanvas");
+        gl = canvas.getContext("experimental-webgl");
+
+        // setup a GLSL program
+        shaderProgram = createProgramFromScripts(gl, "vertex-shader", "fragment-shader");
+        gl.useProgram(shaderProgram);
+
+        loadModel();
+    }
+
+    function generateVerticeBuffer(gl, vertices){
+        var vertexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+        return vertexBuffer;
+    }
+
+    function draw(vertices, indices, x,y,z, rot){
+        gl.clearColor(0.0,0.0,0.0,1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+
+        //Bind vertices position to shader
+        generateVerticeBuffer(gl, vertices);
+
+        var positionLoc = gl.getAttribLocation(shaderProgram,"a_position");
+        var matrixLoc = gl.getUniformLocation(shaderProgram,"u_matrix");
+        var matrix = matrixMultiply(makeYRotation(rot), makeTranslation(x,y,z));
+
+        gl.enableVertexAttribArray(positionLoc);
+        gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, 0,0);
+
+        var indiceBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indiceBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+        gl.uniformMatrix4fv(matrixLoc, false, matrixMultiply(matrix,makePerspective(Math.PI/4,640/480,1,2000)));
+
+        gl.drawElements(gl.TRIANGLES, indices.length, gl.UNSIGNED_SHORT, 0);
+    }
+
+    function makePerspective(fieldOfViewInRadians, aspect, near, far) {
+        var f = Math.tan(Math.PI * 0.5 - 0.5 * fieldOfViewInRadians);
+        var rangeInv = 1.0 / (near - far);
+
+        return [
+            f / aspect, 0, 0, 0,
+            0, f, 0, 0,
+            0, 0, (near + far) * rangeInv, -1,
+            0, 0, near * far * rangeInv * 2, 0
+        ];
+    };
+
+
+    function makeTranslation(tx, ty, tz) {
+        return [
+            1,  0,  0,  0,
+            0,  1,  0,  0,
+            0,  0,  1,  0,
+            tx, ty, tz,  1
+        ];
+    }
+
+    function makeYRotation(angleInRadians) {
+        var c = Math.cos(angleInRadians);
+        var s = Math.sin(angleInRadians);
+
+        return [
+            c, 0, -s, 0,
+            0, 1, 0, 0,
+            s, 0, c, 0,
+            0, 0, 0, 1
+        ];
+    };
+
+    function matrixMultiply(a, b) {
+        var a00 = a[0*4+0];
+        var a01 = a[0*4+1];
+        var a02 = a[0*4+2];
+        var a03 = a[0*4+3];
+        var a10 = a[1*4+0];
+        var a11 = a[1*4+1];
+        var a12 = a[1*4+2];
+        var a13 = a[1*4+3];
+        var a20 = a[2*4+0];
+        var a21 = a[2*4+1];
+        var a22 = a[2*4+2];
+        var a23 = a[2*4+3];
+        var a30 = a[3*4+0];
+        var a31 = a[3*4+1];
+        var a32 = a[3*4+2];
+        var a33 = a[3*4+3];
+        var b00 = b[0*4+0];
+        var b01 = b[0*4+1];
+        var b02 = b[0*4+2];
+        var b03 = b[0*4+3];
+        var b10 = b[1*4+0];
+        var b11 = b[1*4+1];
+        var b12 = b[1*4+2];
+        var b13 = b[1*4+3];
+        var b20 = b[2*4+0];
+        var b21 = b[2*4+1];
+        var b22 = b[2*4+2];
+        var b23 = b[2*4+3];
+        var b30 = b[3*4+0];
+        var b31 = b[3*4+1];
+        var b32 = b[3*4+2];
+        var b33 = b[3*4+3];
+        return [a00 * b00 + a01 * b10 + a02 * b20 + a03 * b30,
+            a00 * b01 + a01 * b11 + a02 * b21 + a03 * b31,
+            a00 * b02 + a01 * b12 + a02 * b22 + a03 * b32,
+            a00 * b03 + a01 * b13 + a02 * b23 + a03 * b33,
+            a10 * b00 + a11 * b10 + a12 * b20 + a13 * b30,
+            a10 * b01 + a11 * b11 + a12 * b21 + a13 * b31,
+            a10 * b02 + a11 * b12 + a12 * b22 + a13 * b32,
+            a10 * b03 + a11 * b13 + a12 * b23 + a13 * b33,
+            a20 * b00 + a21 * b10 + a22 * b20 + a23 * b30,
+            a20 * b01 + a21 * b11 + a22 * b21 + a23 * b31,
+            a20 * b02 + a21 * b12 + a22 * b22 + a23 * b32,
+            a20 * b03 + a21 * b13 + a22 * b23 + a23 * b33,
+            a30 * b00 + a31 * b10 + a32 * b20 + a33 * b30,
+            a30 * b01 + a31 * b11 + a32 * b21 + a33 * b31,
+            a30 * b02 + a31 * b12 + a32 * b22 + a33 * b32,
+            a30 * b03 + a31 * b13 + a32 * b23 + a33 * b33];
+    }
+
+
+
+</script>
+</body>
+</html>
